@@ -1,0 +1,204 @@
+---
+title: "Mapas"
+author: "Teresa Ortiz"
+output: html_document
+---
+
+#### Instrucciones
+
+1. Lo primero es instalar las librerías maptools y gdal. Las usaremos para 
+cargar datos.  
+2. Si desean correr el código de este script tal como esta, 
+necesitan guardar los datos de la siguiente manera: 
+* este script (mapas.Rmd), y los archivos: Municipios.dbf, Municipios.shp, Municipios.shx, etc. deben estar en la misma carpeta, 
++ después crea una carpeta llamada data (dentro de la carpeta anetrior) y guarda los archivos ESTADOS.dbf, ESTADOS.shp y ESTADOS.shx (si 
+copiaste la carpeta completa que subí al sitio esta estructura ya está).  
+3. Asegurate de que tu directorio de trabajo sea el mismo que el directorio
+donde estan guardados los scripts (puedes usar Rstudio ó los comandos getwd() para saber cual es 
+tu directorio y setwd("path_directorio") para definir el nuevo directorio de 
+trabajo).
+4. _**Importante**_ los archivos shp que yo usé en este script están **muy** pesados, 
+es mejor idea usar los mapas que estan en las carpetas "estados_ligera" y 
+"municipios_ligera", solo deben sustituirlos y los scripts correrán igual, noten
+que hay más archivos en los _pesados_ (.prj, .sbn, .sbx) pero no son necesario para 
+que corra.
+
+Comenzamos cargando los paquetes que vamos a usar,
+
+#### Shapefile
+
+Un _shapefile_ es un grupo de archivos que contienen geometrías e información de acuerdo a un estándar especificado por el Insituto de Investigación en Sistemas de Ecosistemas (ESRI). Nosotros tenemos los siguientes grupos de archivos (para estados): 
+* Estados.shp  
+* Estados.dbf  
+* Estados.shx  
+* Estados.prj  
+* Estados.sbn  
+* Estados.sbx  
+
+El archivo .shp es el archivo principal y contiene la geometría correspondiente, el .db contiene los atributos de la geometría. El archivo .prj contiene información de la proyección, lo veremos más adelante, pero es importante cuando se trabaja con más de un shapefile pues pueden tener distintas proyecciones.
+
+Veamos las librerías que usaremos
+
+```{r, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(maptools)
+library(rgdal)
+```
+
+
+Usamos la función readOGR para leer los archivos de municipios
+
+```{r}
+mun_shp <- readOGR("." , "Municipios")
+```
+
+el "." indica que los archivos están en el directorio en el que estamos trabajando.
+
+Notemos que el objeto mex_mun no es un data frame,
+
+```{r, cache=TRUE}
+class(mun_shp)
+```
+
+Lo podemos graficar directamente con plot
+
+```{r}
+plot(mun_shp)
+```
+
+pero para poder graficarlo con ggplot debemos convertirlo en data frame.
+
+Los atributos que relacionan las bases de datos deben ser explícitos (shp y dbf), es por ello asignamos el id a mun_shp, la información que asignamos viene del archivo dbf.
+
+```{r}
+mun_shp@data$id = rownames(mun_shp@data)
+```
+
+Y ahora formamos el data frame (con fortify) que convierte los polígonos en puntos, les asigna el id correspondiente, y asigna también un _grupo_ que indica a que polígono corresponde cada punto.
+
+```{r}
+mun_df <- fortify(mun_shp, region = "id")
+class(mun_df)
+head(mun_df)
+```
+
+
+Ya estamos listos para graficar, usaremos la geometría polígono (este tarda mucho, mejor 
+saltarse).
+
+```{r, cache=TRUE}
+ggplot(data = mun_df, aes(long, lat, group=group)) + 
+  geom_polygon(colour='black', fill='white') + coord_fixed()
+```
+
+Ahora supongamos que solamente deseamos graficar los municipios de Guanajuato. 
+Lo más sencillo es filtrar antes de hacer la instrucción fortify; sin embargo, 
+el objeto que se crea al leer los _shapefiles_ no 
+es un _data frame_ por lo que debemos usar subset.
+
+```{r, cache=TRUE}
+gto_shp <- subset(mun_shp, CVE_ENT == 11)
+gto_df <- gto_shp %>% 
+  fortify(region = "id") %>%
+  arrange(order)
+
+ggplot(gto_df, aes(long, lat, group=group)) + 
+  geom_polygon(colour='black', fill='white') + coord_fixed() +
+  labs(title = "Guanajuato", x = "", y = "") 
+```
+
+La instrucción para leer _shapefiles_ en el paquete _rgdal_ es readORG, en el 
+caso de municipios sería:
+
+```{r}
+mun_shp <- readOGR(".", layer = "Municipios")
+```
+
+Para leer los estados sería:
+
+```{r}
+edo_shp <- readOGR("estados_ligero", layer = "Mex_Edos")
+```
+
+estados\_ligero es la carpeta con los archivos y Mex\_Edos el nobre de los shapefiles.
+
+Además tenemos algunas instrucciones que nos dan más información de los archivos
+
+```{r}
+ogrFIDs("estados_ligero", layer = "Mex_Edos")
+```
+
+nos dice cuáles son los identificadores de los polígonos.
+
+También puede ser importante conocer la proyección del mapa, en nuestro caso es [North America Lambert Conformal Conic Projection](http://en.wikipedia.org/wiki/Lambert_conformal_conic_projection), la información de la proyección está almacenada en el archivo Municipios.prj. Para saber qué 
+proyección estamos usando podemos hacer la siguiente instrucción:
+
+```{r}
+ogrInfo(dsn = "data", layer = "Estados")
+```
+
+y el atributo CRS (Coordinate Reference System) indica **lcc**, que corresponde a
+Lambert Conformal Conic, también nos dice que las unidades son metros y 
+[más](https://www.nceas.ucsb.edu/~frazier/RSpatialGuides/OverviewCoordinateReferenceSystems.pdf). 
+
+El mapa quedaría,
+
+```{r}
+edo_shp@data$id <- rownames(edo_shp@data)
+edo_df <- edo_shp %>%
+  fortify(region = "id") %>%
+  mutate(id = as.numeric(id)) # hacemos el id numérica
+
+head(edo_df)
+
+ggplot(data = edo_df, aes(long, lat, group = group)) + 
+  geom_polygon(colour='black', fill='white') + coord_fixed()
+```
+
+#### Añadir variables al mapa
+
+Nuestro objetivo final es hacer mapas para representar una variable, veamos
+como haríamos para representar la tasa de emigración a EUA (por cada 10 mil habitantes).
+
+```{r}
+library(Hmisc) # para crear variable categórica con cut2
+
+# estos datos no están limpios!
+migracion <- read.csv("data/migracion_EUA.csv", stringsAsFactors=FALSE)[1:32, ] %>%
+  mutate(CVE_ENT = as.numeric(Clave.de.la.entidad.federativa),  # uniremos a edo_shp usando esta var
+         migracion2009 = as.numeric(X2009), 
+         migracion2009_cat = cut2(x = migracion2009, g=6),
+         id = CVE_ENT-1) %>% # el id es CVE_ENT - 1
+         select(id, CVE_ENT, migracion2009, migracion2009_cat, Entidad.federativa)
+head(migracion)
+
+```
+
+Para incluirlas en el mapa añadimos las variables de interés a la base de datos
+edo_df, para eso necesitamos saber en base 
+a que variable unir (edo con edo); veamos que los nombres de los estados y los _id_s están
+en el objeto edo_shp,
+
+```{r, cache=TRUE}
+edo_shp@data # vemos el id (CVE_ENT-1)
+
+edo_migracion <- left_join(edo_df, migracion) 
+head(edo_migracion)
+
+ggplot(data = edo_migracion, aes(long, lat, group=group)) + 
+  geom_polygon(aes(fill = migracion2009_cat, group = group))  +
+  geom_path(color = "gray", size = 0.15, aes(group = group)) +
+  scale_fill_brewer(palette = "YlOrRd") +
+  labs(title = "Tasa de emigración a EUA", x = "", y = "", fill = "Tasa") + 
+  theme(legend.title.align = 0.5) + 
+  coord_fixed() 
+```
+ 
+Para resumir las uniones de bases de datos hicimos:  
+  
+1. Examinamos edo_shp@data y notamos que los ids corresponden a la clave del edo - 1.
+2. Creamos la variable id en migracion y unimos los data frames.  
+3. Graficamos!
+
+****
